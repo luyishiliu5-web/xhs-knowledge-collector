@@ -1,0 +1,39 @@
+# 小红书内容采集 - 配置文件
+# 使用真实 Chrome + 持久化 Profile 方案
+# 复制此文件为 config.yaml 并按需修改
+
+# Chrome 浏览器路径
+chrome_path: "/path/to/your/chrome"
+
+# Chrome 用户数据目录（持久化登录态）
+user_data_dir: "./user_data"
+
+# 知识库输出目录
+knowledge_base_dir: "./knowledge_base"
+
+# 浏览器模式（WSL/Linux 无 GUI 需设为 true）
+headless: true
+
+# 采集行为控制
+behavior:
+  min_delay: 3
+  max_delay: 8
+  scroll_delay_min: 1.5
+  scroll_delay_max: 4.0
+  scroll_step_min: 300
+  scroll_step_max: 800
+
+# 请求频率控制
+rate_limit:
+  min_interval: 30
+  max_daily: 20
+
+# 采集内容
+collect:
+  comments: true
+  max_comments: 50
+  images: false
+
+# 反检测
+anti_detection:
+  pass

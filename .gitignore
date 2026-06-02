@@ -1,0 +1,33 @@
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# 浏览器用户数据（含登录态 Cookie，非常敏感）
+user_data/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code 配置（本地专用，不公开）
+.claude/
+
+# Hermes Agent 配置
+.hermes/
+
+# IDE 配置
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 采集数据缓存
+*.tmp
+/tmp/
