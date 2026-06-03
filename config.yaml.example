@@ -1,18 +1,17 @@
-# 小红书内容采集 - 配置文件
-# 使用真实 Chrome + 持久化 Profile 方案
-# 复制此文件为 config.yaml 并按需修改
+# 小红书内容采集 - 配置文件示例
+# 复制为 config.yaml 后修改
 
 # Chrome 浏览器路径
-chrome_path: "/path/to/your/chrome"
+chrome_path: "/home/xiaohuang2/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome"
 
 # Chrome 用户数据目录（持久化登录态）
 user_data_dir: "./user_data"
 
-# 知识库输出目录
-knowledge_base_dir: "./knowledge_base"
-
-# 浏览器模式（WSL/Linux 无 GUI 需设为 true）
+# WSL 环境必须设为 true（没有 X Server）
 headless: true
+
+# LLMWiki 知识库输出目录
+knowledge_base_dir: "./knowledge_base"
 
 # 采集行为控制
 behavior:
@@ -33,6 +32,25 @@ collect:
   comments: true
   max_comments: 50
   images: false
+
+# 视频采集
+video:
+  download: true
+  max_size_mb: 500
+  download_dir: "./videos"
+  formats: ["mp4"]
+  quality: "highest"
+
+# 语音转文字 (ASR)
+asr:
+  enabled: true
+  # 模型: tiny | base | small | medium | large
+  # - base: 速度优先（推荐，中文质量尚可）
+  # - small: 质量优先但 CPU 较慢
+  whisper_model: "base"
+  whisper_language: "zh"
+  max_audio_seconds: 3600
+  use_api_fallback: false
 
 # 反检测
 anti_detection:

@@ -51,14 +51,9 @@ class WikiWriter:
 
     def _make_filename(self, data: dict) -> str:
         date_str = datetime.now().strftime("%Y%m%d")
-        title = data.get("title", "无标题")
-        # 从标题生成文件名：去掉特殊字符，保留中文、字母、数字
-        safe_title = re.sub(r"[^\w一-鿿]", "", title)
-        safe_title = re.sub(r"\s+", "", safe_title)
-        safe_title = safe_title[:30]  # 太长就截断
-        if not safe_title:
-            safe_title = "无标题"
-        return f"{date_str}_{safe_title}.md"
+        note_id = data.get("note_id", "unknown")
+        safe_id = re.sub(r"[^\w]", "", note_id)[:12]
+        return f"{date_str}_{safe_id}.md"
 
     def _render_markdown(self, data: dict, category: str, tags: list) -> str:
         title = data.get("title", "无标题")
@@ -71,24 +66,49 @@ class WikiWriter:
         collected_at = data.get("collected_at", "")
         comments = data.get("comments", [])
 
+        # 视频字段
+        has_video = data.get("has_video", False)
+        video_url = data.get("video_url", "")
+        video_path = data.get("video_path", "")
+        cover_path = data.get("cover_path", "")
+        video_duration = data.get("video_duration", "")
+        video_width = data.get("video_width", "")
+        video_height = data.get("video_height", "")
+
+        note_type = "🎬 视频" if has_video else "📝 图文"
         tags_str = " ".join(f"#{t}" for t in tags) if tags else ""
+
+        # 格式化时长
+        duration_str = ""
+        if video_duration:
+            try:
+                secs = int(video_duration)
+                if secs >= 60:
+                    m, s = divmod(secs, 60)
+                    duration_str = f"{m}分{s}秒"
+                else:
+                    duration_str = f"{secs}秒"
+            except (ValueError, TypeError):
+                duration_str = str(video_duration)
 
         md = f"""---
 category: {category}
 author: {author}
 url: {url}
+type: {note_type}
 likes: {likes}
 collects: {collects}
 publish_time: {publish_time}
 collected_at: {collected_at}
 tags: {", ".join(tags)}
+has_video: {str(has_video).lower()}
 ---
 
 # {title}
 
 {tags_str}
 
-> 作者: **{author}** | 点赞: {likes} | 收藏: {collects} | 发布时间: {publish_time}
+> 作者: **{author}** | {note_type} | 点赞: {likes} | 收藏: {collects} | 发布时间: {publish_time}
 >
 > 原文链接: {url}
 
@@ -98,8 +118,37 @@ tags: {", ".join(tags)}
 
 {content}
 
----
+"""
 
+        # ── 视频信息 ──
+        if has_video:
+            md += f"""---
+## 🎬 视频信息
+
+"""
+            if duration_str:
+                md += f"- **时长**: {duration_str}\n"
+            if video_width and video_height:
+                md += f"- **分辨率**: {video_width}×{video_height}\n"
+
+            # 本地视频文件
+            if video_path:
+                video_rel = self._make_video_relative(video_path)
+                md += f"- **本地文件**: [{video_rel}]({video_rel})\n"
+
+            # 原始视频链接
+            if video_url:
+                md += f"- **原始链接**: [视频源]({video_url})\n"
+
+            # 封面图
+            if cover_path:
+                cover_rel = self._make_video_relative(cover_path)
+                md += f"- **封面图**: [{cover_rel}]({cover_rel})\n"
+
+            md += "\n"
+
+        # ── 评论 ──
+        md += f"""---
 ## 评论 ({len(comments)} 条)
 
 """
@@ -113,6 +162,15 @@ tags: {", ".join(tags)}
 
         md += f"\n---\n*采集于 {collected_at} | 来源: 小红书*"
         return md
+
+    def _make_video_relative(self, video_path: str) -> str:
+        """将视频绝对路径转为相对于知识库目录的路径"""
+        try:
+            vp = Path(video_path)
+            rel = vp.relative_to(self.kb_dir.parent)
+            return rel.as_posix()
+        except ValueError:
+            return video_path
 
     def write_summary(self, data: dict, summary: str, category: str = "未分类", tags: list = None):
         """
@@ -140,7 +198,7 @@ tags: {", ".join(tags)}
         collected_at = data.get("collected_at", "")[:10]
         author = data.get("author", "")
 
-        entry = f"- [{title}]({rel_path.as_posix()}) — {author} ({collected_at})"
+        entry = f"- [{title}]({rel_path.as_posix()}) — {author} ({collected_at}{' 🎬' if data.get('has_video') else ''})"
 
         if self.index_path.exists():
             content = self.index_path.read_text(encoding="utf-8")

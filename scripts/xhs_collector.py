@@ -1,6 +1,6 @@
 """
 小红书内容采集器 - 基于 Patchright 持久化 Profile
-采集笔记正文 + 评论，输出结构化数据
+采集笔记正文 + 评论 + 视频，输出结构化数据
 """
 import time
 import random
@@ -11,6 +11,9 @@ from pathlib import Path
 from datetime import datetime
 from markdownify import markdownify as md
 
+from video_handler import VideoHandler
+from speech_to_text import SpeechToText
+
 
 class XHSCollector:
     def __init__(self, config_path: str = None):
@@ -19,10 +22,20 @@ class XHSCollector:
         with open(config_path, "r", encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
         self.collect_config = self.config["collect"]
+        self.video_config = self.config.get("video", {})
+        self.asr_config = self.config.get("asr", {})
+        self.video_handler = VideoHandler(str(config_path))
+        self.asr = SpeechToText(str(config_path))
 
-    def collect(self, page, url: str) -> dict:
+    def collect(self, page, url: str, download_video: bool = True) -> dict:
         """
-        采集单篇笔记的内容 + 评论。
+        采集单篇笔记的内容 + 评论 + 视频。
+
+        Args:
+            page: Patchright Page 对象
+            url: 笔记 URL
+            download_video: 是否下载视频文件到本地
+
         返回结构化 dict，供 wiki_writer 使用。
         """
         note_id = self._extract_note_id(url)
@@ -31,28 +44,99 @@ class XHSCollector:
         # 导航到页面
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        # 获取重定向后的真实 URL（处理 xhslink 等短链接）
-        real_url = self._clean_url(page.url)
-        note_id = self._extract_note_id(real_url)
-        print(f"[采集] 真实URL: {real_url}")
-
         # 等待内容加载
         self._wait_for_content(page)
 
-        # 提取内容
+        # 提取正文
+        content = self._extract_content(page)
+        title = self._extract_title(page)
+
+        # ── 视频检测与提取 ──
+        video_info = self.video_handler.extract_video_info(page)
+        video_path = None
+        cover_path = None
+        asr_result = None
+
+        if video_info["has_video"]:
+            print(f"[采集] 检测到视频笔记 (流: {len(video_info['video_streams'])} 个)")
+
+            # 下载视频
+            if download_video and self.video_config.get("download", True):
+                video_path = self.video_handler.download_video(video_info, note_id)
+                if video_info.get("cover_url"):
+                    cover_path = self.video_handler.download_cover(
+                        video_info["cover_url"], note_id
+                    )
+
+            # ── ASR: 语音转文字 ──
+            # 视频笔记的核心信息在口播里，ASR 提取后作为正文
+            if self.asr_config.get("enabled", True) and video_path:
+                asr_result = self.asr.transcribe(video_path, note_id)
+
+                if asr_result and asr_result.get("transcript"):
+                    transcript = asr_result["transcript"]
+                    print(
+                        f"[采集] ASR 文字稿: {len(transcript)} 字 "
+                        f"(来源: {asr_result['source']})"
+                    )
+
+                    # 视频文字稿完全替换正文（因为视频正文通常为空或极短）
+                    # 同时保留原始视频描述作为补充
+                    orig_desc = content if len(content) > 10 else video_info.get("video_desc", "")
+
+                    if transcript:
+                        if orig_desc and len(orig_desc) > 10:
+                            content = (
+                                f"> 视频简介：{orig_desc}\n\n"
+                                f"## 📝 语音文字稿\n\n{transcript}"
+                            )
+                        else:
+                            content = f"## 📝 语音文字稿\n\n{transcript}"
+                else:
+                    # ASR 失败，用视频描述兜底
+                    if (not content or len(content) < 20) and video_info.get("video_desc"):
+                        content = video_info["video_desc"]
+                        print(f"[采集] ASR 失败，已用视频描述作为正文")
+            elif (not content or len(content) < 20) and video_info.get("video_desc"):
+                # 未启用 ASR，直接用视频描述
+                content = video_info["video_desc"]
+                print(f"[采集] 正文较短，已用视频描述补充")
+
+        # 组装结果
         result = {
             "note_id": note_id,
-            "url": real_url,
-            "title": self._extract_title(page),
+            "url": url,
+            "title": title,
             "author": self._extract_author(page),
-            "content": self._extract_content(page),
+            "content": content,
             "likes": self._extract_likes(page),
             "collects": self._extract_collects(page),
             "publish_time": self._extract_publish_time(page),
             "comments": self._extract_comments(page) if self.collect_config["comments"] else [],
             "collected_at": datetime.now().isoformat(),
+            # 视频字段
+            "has_video": video_info["has_video"],
+            "video_url": video_info["video_url"],
+            "video_streams": video_info["video_streams"],
+            "video_duration": video_info["duration"],
+            "video_width": video_info["width"],
+            "video_height": video_info["height"],
+            "video_cover_url": video_info["cover_url"],
+            "video_path": str(video_path) if video_path else None,
+            "cover_path": str(cover_path) if cover_path else None,
+            # ASR 字段
+            "asr_transcript": asr_result.get("transcript", "") if (
+                video_info["has_video"] and asr_result
+            ) else "",
+            "asr_source": asr_result.get("source", "") if (
+                video_info["has_video"] and asr_result
+            ) else "",
         }
-        print(f"[采集] 完成: {result['title'][:50]}... ({len(result['comments'])} 条评论)")
+        print(
+            f"[采集] 完成: {result['title'][:50]}... "
+            f"({'视频' if result['has_video'] else '图文'}, "
+            f"{len(result['comments'])} 条评论)"
+        )
         return result
 
     def _extract_note_id(self, url: str) -> str:
@@ -60,11 +144,6 @@ class XHSCollector:
         if m:
             return m.group(1)
         m = re.search(r"/discovery/item/([a-zA-Z0-9]+)", url)
-        return m.group(1) if m else url
-
-    def _clean_url(self, url: str) -> str:
-        """去除追踪参数，保留干净的笔记 URL"""
-        m = re.match(r"(https?://www\.xiaohongshu\.com/(?:explore|discovery/item)/[a-zA-Z0-9]+)", url)
         return m.group(1) if m else url
 
     def _wait_for_content(self, page, timeout: int = 15):
@@ -157,21 +236,11 @@ class XHSCollector:
         return ""
 
     def _extract_likes(self, page) -> str:
-        selectors = [
-            "[class*='like'] [class*='count']",
-            "[class*='like'] span",
-            "[class*='engage-bar'] [class*='count']",
-            "[class*='interact'] [class*='count']",
-        ]
+        selectors = ["[class*='like'] span", "[class*='like'] [class*='count']"]
         return self._extract_stat(page, selectors)
 
     def _extract_collects(self, page) -> str:
-        selectors = [
-            "[class*='collect'] [class*='count']",
-            "[class*='collect'] span",
-            "[class*='star'] [class*='count']",
-            "[class*='engage-bar'] [class*='count']:nth-child(2)",
-        ]
+        selectors = ["[class*='collect'] span", "[class*='collect'] [class*='count']"]
         return self._extract_stat(page, selectors)
 
     def _extract_stat(self, page, selectors: list) -> str:
@@ -215,7 +284,7 @@ class XHSCollector:
                     comments.append(c)
 
             # 拟人滚动
-            page.evaluate("(px) => window.scrollBy(0, px)",
+            page.evaluate("(scrollY) => window.scrollBy(0, scrollY)",
                           random.randint(400, 900))
             time.sleep(random.uniform(1.5, 3.5))
             scroll_attempts += 1
