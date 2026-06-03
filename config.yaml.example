@@ -46,7 +46,7 @@ asr:
   enabled: true
   # 模型: tiny | base | small | medium | large
   # - base: 速度优先（推荐，中文质量尚可）
-  # - small: 质量优先但 CPU 较慢
+  # - small: 质量优先（推荐，中文效果好，CPU 可接受）
   whisper_model: "base"
   whisper_language: "zh"
   max_audio_seconds: 3600
